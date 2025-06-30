@@ -29,7 +29,7 @@
 namespace cloud {
 using namespace parthenon::driver::prelude;
 
-Real rho_wind, mom_wind, rhoe_wind, r_cloud, rho_cloud;
+Real rho_wind, mom_wind, rhoe_wind, r_cloud, rho_cloud, mom_cloud, rhoe_cloud;
 Real Bx = 0.0;
 Real By = 0.0;
 Real Bz = 0.0;
@@ -53,26 +53,51 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   r_cloud = pin->GetReal("problem/cloud", "r0_cgs") / units.code_length_cgs();
   rho_cloud = pin->GetReal("problem/cloud", "rho_cloud_cgs") / units.code_density_cgs();
   rho_wind = pin->GetReal("problem/cloud", "rho_wind_cgs") / units.code_density_cgs();
+
   auto T_wind = pin->GetReal("problem/cloud", "T_wind_cgs");
   auto Mach_wind = pin->GetReal("problem/cloud", "Mach_wind");
+  auto pressure_diseq_flag = pin->GetOrAddBoolean("problem/cloud", "pressure_disequilibrium", false);
 
   // mu_mh_gm1_by_k_B is already in code units
   rhoe_wind = T_wind * rho_wind / mbar_over_kb / gm1;
+
   const auto c_s_wind = std::sqrt(gamma * gm1 * rhoe_wind / rho_wind);
   const auto chi_0 = rho_cloud / rho_wind;               // cloud to wind density ratio
   const auto v_wind = c_s_wind * Mach_wind;
   const auto t_cc = r_cloud * std::sqrt(chi_0) / v_wind; // cloud crushting time (code)
-  const auto pressure =
+  const auto pressure_wind =
       gm1 * rhoe_wind; // one value for entire domain given initial pressure equil.
 
-  const auto T_cloud = pressure / rho_cloud * mbar_over_kb;
+  //TODO Check the variable types, auto vs const auto vs (blank)
+  if (pressure_diseq_flag) {
+    const auto pressure_cloud = gm1 * rhoe_cloud;
+    auto T_cloud = pin->GetReal("problem/cloud", "T_cloud_cgs", -1.0);
+    rhoe_cloud = T_cloud * rho_cloud / mbar_over_kb / gm1;
+  // TODO need to look for rhoe_wind used  elsewhere, to account for the pressure differences
+  else{
+    const auto T_cloud = pressure_wind / rho_cloud * mbar_over_kb;
+    const auto pressure_cloud = pressure_wind;
+    rhoe_cloud = rhoe_wind;
+  }
 
   auto plasma_beta = pin->GetOrAddReal("problem/cloud", "plasma_beta", -1.0);
 
   auto mag_field_angle_str =
       pin->GetOrAddString("problem/cloud", "mag_field_angle", "undefined");
+
   // To support using the MHD integrator as Hydro (with B=0 indicated by plasma_beta = 0)
   // we avoid division by 0 here.
+  
+  if (pressure_diseq_flag) {
+    if (plasma_beta > 0.0) {
+      PARTHENON_FAIL("Currently not supported to have magnetic fields *with* system out of initial equilibrium.");
+    }
+  }
+  else {
+    // pointer to assign pressure to pressure_wind
+    auto* pressure = &pressure_wind;
+  }
+
   if (plasma_beta > 0.0) {
     if (mag_field_angle_str == "aligned") {
       By = std::sqrt(2.0 * pressure / plasma_beta);
@@ -101,12 +126,19 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   msg << "## Wind temperature: " << T_wind << " K" << std::endl;
   msg << "## Wind velocity: " << v_wind / units.km_s() << " km/s" << std::endl;
   msg << "#### Derived parameters" << std::endl;
-  msg << "## Cloud temperature (from pressure equ.): " << T_cloud << " K" << std::endl;
+  msg << "## Cloud temperature: " << T_cloud << " K" << std::endl;
   msg << "## Cloud to wind density ratio: " << chi_0 << std::endl;
   msg << "## Cloud to wind temperature ratio: " << T_cloud / T_wind << std::endl;
-  msg << "## Uniform pressure (code units): " << pressure << std::endl;
+  if (pressure_diseq_flag) {
+    msg << "## Wind pressure (code units): " << pressure_wind << std::endl;
+    msg << "## Cloud pressure (code units): " << pressure_cloud << std::endl;
+  } else {
+    msg << "## Uniform pressure (code units): " << pressure_wind << std::endl;
+  }
   msg << "## Wind sonic Mach: " << v_wind / c_s_wind << std::endl;
   msg << "## Cloud crushing time: " << t_cc / units.myr() << " Myr" << std::endl;
+  // TODO first add break here after the print statement so you can check output
+  PARTHENON_FAIL("finished");
 
   // (potentially) rescale global times only at the beginning of a simulation
   auto rescale_code_time_to_tcc =
@@ -180,26 +212,31 @@ void ProblemGenerator(MeshBlock *pmb, ParameterInput *pin) {
         const Real z = coords.Xc<3>(k);
         const Real rad = std::sqrt(SQR(x) + SQR(y) + SQR(z));
 
-        Real rho; // = rho_wind + 0.5 * (rho_cloud - rho_wind) *
-                   //               (1.0 - std::tanh(steepness * (rad / r_cloud - 1.0)));
+	// TODO Double check if this is the actual real density profile.
+        Real rho = rho_wind + 0.5 * (rho_cloud - rho_wind) *
+                                  (1.0 - std::tanh(steepness * (rad / r_cloud - 1.0)));
 
-        Real mom;
+        Real mom = 0.0;
+	// TODO if statement based on actual density rho (rho above), and actual temperature (T need to calculate)
+	Real T = (rad < r_cloud) ? pressure_cloud / rho_cloud : pressure_wind / rho_wind; // TODO fix units
+	Real rhoe_local = T * rho / mbar_over_kb / gm1;
         // Factor 1.3 as used in Grønnow, Tepper-García, & Bland-Hawthorn 2018,
         // i.e., outside the cloud boundary region (for steepness 10)
-        if (rad < r_cloud) {
-          mom = 0.0;
-          rho = rho_cloud;
-        } else {
-          mom = 0.0;
-          rho = rho_wind;
-        }
+        //if (rad < r_cloud) {
+        //  mom = 0.0;
+        //  rho = rho_cloud;
+        //} else {
+        //  mom = 0.0;
+        //  rho = rho_wind;
+        // }
 
         u(IDN, k, j, i) = rho;
         u(IM2, k, j, i) = mom;
-        // Can use rhoe_wind here as simulation is setup in pressure equil.
-        u(IEN, k, j, i) = rhoe_wind + 0.5 * mom * mom / rho;
-        //if (j == kb.s) printf("Initial density, momm and energy of cells: %e, %e, %e \n", rho, mom, rhoe_wind + 0.5 * mom * mom / rho);
 
+        // Can use rhoe_wind here as simulation is setup in pressure equil.
+        u(IEN, k, j, i) = rhoe_local + 0.5 * mom * mom / rho;
+        //if (j == kb.s) printf("Initial density, momm and energy of cells: %e, %e, %e \n", rho, mom, rhoe_wind + 0.5 * mom * mom / rho);
+   // TODO CCD still need to edit below this point
         if (mhd_enabled) {
           u(IB1, k, j, i) = Bx;
           u(IB2, k, j, i) = By;
