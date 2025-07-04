@@ -11,7 +11,7 @@ export APKDIR="athenapk-fork-ccd"
 #git clone https://github.com/ccdoughty/athenapk-fork-ccd.git athenapk-fork-ccd
 
 cd $APKDIR
-
+#
 # get submodules (mainly Kokkos and Parthenon)
 #git submodule init
 #git submodule update
