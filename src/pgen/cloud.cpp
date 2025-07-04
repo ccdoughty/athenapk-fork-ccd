@@ -210,26 +210,18 @@ void ProblemGenerator(MeshBlock *pmb, ParameterInput *pin) {
         const Real rad = std::sqrt(SQR(x) + SQR(y) + SQR(z));
 
         Real rho;  //= rho_wind + 0.5 * (rho_cloud - rho_wind) * (1.0 - std::tanh(steepness * (rad / r_cloud - 1.0)));
-
+        Real rhoe;
         Real mom = 0.0;
-	Real T;
-
-	auto gamma = pin->GetReal("hydro", "gamma");
-        auto gm1 = (gamma - 1.0);
-        //const auto &pkg = mesh->packages.Get("Hydro");
-        const auto mbar_over_kb = hydro_pkg->Param<int>("mbar_over_kb");  // pkg->Param<Real>("mbar_over_kb");
 
         // Factor 1.3 as used in Grønnow, Tepper-García, & Bland-Hawthorn 2018,
         // i.e., outside the cloud boundary region (for steepness 10)
         if (rad < r_cloud) {
           rho = rho_cloud;
-	  T = T_cloud;
+	  rhoe = rhoe_cloud;
         } else {
           rho = rho_wind;
-	  T = T_wind;
+	  rhoe = rhoe_wind;
         }
-
-	Real rhoe = T * rho / mbar_over_kb / gm1;
 
         u(IDN, k, j, i) = rho;
         u(IM2, k, j, i) = mom;
