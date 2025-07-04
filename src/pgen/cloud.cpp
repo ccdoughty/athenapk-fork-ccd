@@ -68,13 +68,11 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   const auto pressure_wind =
       gm1 * rhoe_wind; // one value for entire domain given initial pressure equil.
 
-  //TODO Check the variable types, auto vs const auto vs (blank)
   if (pressure_diseq_flag) {
-    const auto pressure_cloud = gm1 * rhoe_cloud;
-    auto T_cloud = pin->GetReal("problem/cloud", "T_cloud_cgs", -1.0);
+    const auto T_cloud = pin->GetOrAddReal("problem/cloud", "T_cloud_cgs", -1.0);
     rhoe_cloud = T_cloud * rho_cloud / mbar_over_kb / gm1;
-  // TODO need to look for rhoe_wind used  elsewhere, to account for the pressure differences
-  else{
+    const auto pressure_cloud = gm1 * rhoe_cloud;
+  } else{
     const auto T_cloud = pressure_wind / rho_cloud * mbar_over_kb;
     const auto pressure_cloud = pressure_wind;
     rhoe_cloud = rhoe_wind;
@@ -88,14 +86,14 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   // To support using the MHD integrator as Hydro (with B=0 indicated by plasma_beta = 0)
   // we avoid division by 0 here.
   
+  Real pressure;
   if (pressure_diseq_flag) {
     if (plasma_beta > 0.0) {
       PARTHENON_FAIL("Currently not supported to have magnetic fields *with* system out of initial equilibrium.");
     }
   }
   else {
-    // pointer to assign pressure to pressure_wind
-    auto* pressure = &pressure_wind;
+    pressure = pressure_wind;
   }
 
   if (plasma_beta > 0.0) {
@@ -138,7 +136,7 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   msg << "## Wind sonic Mach: " << v_wind / c_s_wind << std::endl;
   msg << "## Cloud crushing time: " << t_cc / units.myr() << " Myr" << std::endl;
   // TODO first add break here after the print statement so you can check output
-  PARTHENON_FAIL("finished");
+  //PARTHENON_FAIL("finished");
 
   // (potentially) rescale global times only at the beginning of a simulation
   auto rescale_code_time_to_tcc =
@@ -212,31 +210,28 @@ void ProblemGenerator(MeshBlock *pmb, ParameterInput *pin) {
         const Real z = coords.Xc<3>(k);
         const Real rad = std::sqrt(SQR(x) + SQR(y) + SQR(z));
 
-	// TODO Double check if this is the actual real density profile.
-        Real rho = rho_wind + 0.5 * (rho_cloud - rho_wind) *
-                                  (1.0 - std::tanh(steepness * (rad / r_cloud - 1.0)));
+        Real rho;  //= rho_wind + 0.5 * (rho_cloud - rho_wind) * (1.0 - std::tanh(steepness * (rad / r_cloud - 1.0)));
 
         Real mom = 0.0;
-	// TODO if statement based on actual density rho (rho above), and actual temperature (T need to calculate)
-	Real T = (rad < r_cloud) ? pressure_cloud / rho_cloud : pressure_wind / rho_wind; // TODO fix units
-	Real rhoe_local = T * rho / mbar_over_kb / gm1;
+	Real T;
+
         // Factor 1.3 as used in Grønnow, Tepper-García, & Bland-Hawthorn 2018,
         // i.e., outside the cloud boundary region (for steepness 10)
-        //if (rad < r_cloud) {
-        //  mom = 0.0;
-        //  rho = rho_cloud;
-        //} else {
-        //  mom = 0.0;
-        //  rho = rho_wind;
-        // }
+        if (rad < r_cloud) {
+          rho = rho_cloud;
+	  T = T_cloud;
+        } else {
+          rho = rho_wind;
+	  T = T_wind;
+        }
+
+	Real rhoe = T * rho / mbar_over_kb / gm1;
 
         u(IDN, k, j, i) = rho;
         u(IM2, k, j, i) = mom;
 
-        // Can use rhoe_wind here as simulation is setup in pressure equil.
-        u(IEN, k, j, i) = rhoe_local + 0.5 * mom * mom / rho;
+        u(IEN, k, j, i) = rhoe + 0.5 * mom * mom / rho;
         //if (j == kb.s) printf("Initial density, momm and energy of cells: %e, %e, %e \n", rho, mom, rhoe_wind + 0.5 * mom * mom / rho);
-   // TODO CCD still need to edit below this point
         if (mhd_enabled) {
           u(IB1, k, j, i) = Bx;
           u(IB2, k, j, i) = By;
