@@ -29,7 +29,8 @@
 namespace cloud {
 using namespace parthenon::driver::prelude;
 
-Real rho_wind, mom_wind, rhoe_wind, r_cloud, rho_cloud, mom_cloud, rhoe_cloud;
+Real rho_wind, mom_wind, rhoe_wind, T_wind, pressure_wind, pressure;
+Real r_cloud, rho_cloud, mom_cloud, rhoe_cloud, T_cloud, pressure_cloud;
 Real Bx = 0.0;
 Real By = 0.0;
 Real Bz = 0.0;
@@ -65,16 +66,15 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   const auto chi_0 = rho_cloud / rho_wind;               // cloud to wind density ratio
   const auto v_wind = c_s_wind * Mach_wind;
   const auto t_cc = r_cloud * std::sqrt(chi_0) / v_wind; // cloud crushting time (code)
-  const auto pressure_wind =
-      gm1 * rhoe_wind; // one value for entire domain given initial pressure equil.
+  pressure_wind = gm1 * rhoe_wind;
 
   if (pressure_diseq_flag) {
-    const auto T_cloud = pin->GetOrAddReal("problem/cloud", "T_cloud_cgs", -1.0);
+    T_cloud = pin->GetOrAddReal("problem/cloud", "T_cloud_cgs", -1.0);
     rhoe_cloud = T_cloud * rho_cloud / mbar_over_kb / gm1;
-    const auto pressure_cloud = gm1 * rhoe_cloud;
+    pressure_cloud = gm1 * rhoe_cloud;
   } else{
-    const auto T_cloud = pressure_wind / rho_cloud * mbar_over_kb;
-    const auto pressure_cloud = pressure_wind;
+    T_cloud = pressure_wind / rho_cloud * mbar_over_kb;
+    pressure_cloud = pressure_wind;
     rhoe_cloud = rhoe_wind;
   }
 
@@ -91,8 +91,7 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
     if (plasma_beta > 0.0) {
       PARTHENON_FAIL("Currently not supported to have magnetic fields *with* system out of initial equilibrium.");
     }
-  }
-  else {
+  } else {
     pressure = pressure_wind;
   }
 
@@ -214,6 +213,11 @@ void ProblemGenerator(MeshBlock *pmb, ParameterInput *pin) {
 
         Real mom = 0.0;
 	Real T;
+
+	auto gamma = pin->GetReal("hydro", "gamma");
+        auto gm1 = (gamma - 1.0);
+        //const auto &pkg = mesh->packages.Get("Hydro");
+        const auto mbar_over_kb = hydro_pkg->Param<int>("mbar_over_kb");  // pkg->Param<Real>("mbar_over_kb");
 
         // Factor 1.3 as used in Grønnow, Tepper-García, & Bland-Hawthorn 2018,
         // i.e., outside the cloud boundary region (for steepness 10)
