@@ -31,6 +31,7 @@ using namespace parthenon::driver::prelude;
 
 Real rho_wind, mom_wind, rhoe_wind, T_wind, pressure_wind, pressure;
 Real r_cloud, rho_cloud, mom_cloud, rhoe_cloud, T_cloud, pressure_cloud;
+bool init_static_bg;
 Real Bx = 0.0;
 Real By = 0.0;
 Real Bz = 0.0;
@@ -58,6 +59,7 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   auto T_wind = pin->GetReal("problem/cloud", "T_wind_cgs");
   auto Mach_wind = pin->GetReal("problem/cloud", "Mach_wind");
   auto pressure_diseq_flag = pin->GetOrAddBoolean("problem/cloud", "pressure_disequilibrium", false);
+  init_static_bg = pin->GetOrAddBoolean("problem/cloud", "init_bg_moves", false);
 
   // mu_mh_gm1_by_k_B is already in code units
   rhoe_wind = T_wind * rho_wind / mbar_over_kb / gm1;
@@ -65,7 +67,7 @@ void InitUserMeshData(Mesh *mesh, ParameterInput *pin) {
   const auto c_s_wind = std::sqrt(gamma * gm1 * rhoe_wind / rho_wind);
   const auto chi_0 = rho_cloud / rho_wind;               // cloud to wind density ratio
   const auto v_wind = c_s_wind * Mach_wind;
-  const auto t_cc = r_cloud * std::sqrt(chi_0) / v_wind; // cloud crushting time (code)
+  const auto t_cc = r_cloud * std::sqrt(chi_0) / v_wind; // cloud crushing time (code)
   pressure_wind = gm1 * rhoe_wind;
 
   if (pressure_diseq_flag) {
@@ -211,8 +213,13 @@ void ProblemGenerator(MeshBlock *pmb, ParameterInput *pin) {
 
         Real rho;  //= rho_wind + 0.5 * (rho_cloud - rho_wind) * (1.0 - std::tanh(steepness * (rad / r_cloud - 1.0)));
         Real rhoe;
-        Real mom = 0.0;
 
+	Real mom = mom_wind;
+
+	if (init_static_bg) {
+          Real mom = 0.0;
+        }
+	  
         // Factor 1.3 as used in Grønnow, Tepper-García, & Bland-Hawthorn 2018,
         // i.e., outside the cloud boundary region (for steepness 10)
         if (rad < r_cloud) {
